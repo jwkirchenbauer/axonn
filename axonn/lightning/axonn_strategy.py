@@ -229,9 +229,13 @@ class AxonnStrategy(ParallelStrategy):
             with optimize_communication(True, True, True, module):
                 modules_in_reverse = torch.nn.ModuleList(list(module.modules())[::-1])
                 with overlap_all_gathers_for_checkpointed_forward(modules_in_reverse):
-                    super().backward(tensor, module, *args, **kwargs)
+                    # super().backward(tensor, module, *args, **kwargs)
+                    # print("Calling simple loss.backward() w/ overlap")
+                    tensor.backward()
         else:
-            super().backward(tensor, module, *args, **kwargs)
+            # super().backward(tensor, module, *args, **kwargs)
+            # print("Calling simple loss.backward() no overlap")
+            tensor.backward()
         if self.G_intra_d > 1:
             sync_gradients_depth_parallel(module, mean=True)
         if self.G_data > 1:
