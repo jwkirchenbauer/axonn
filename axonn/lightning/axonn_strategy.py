@@ -176,6 +176,38 @@ class AxonnStrategy(ParallelStrategy):
         torch.distributed.broadcast_object_list(obj, src, group=_group.WORLD)
         return obj[0]
 
+    @override
+    def all_gather_object(self, obj, group=_group.WORLD):
+        """
+        All gather for serializable python objects over world group.
+        FIXME this is @jwkirchenbauer crap.
+        """
+        dst_list = [None for _ in range(torch.distributed.get_world_size(group=group))]
+        torch.distributed.all_gather_object(dst_list, obj, group=group)
+        return dst_list
+
+    @override
+    def all_gather(self, data, group=_group.WORLD, sync_grads=None):
+        """
+        All gather over data parallel groups.
+        FIXME this is @jwkirchenbauer crap.
+        """
+        # handling upstream Fabric calling conventions
+        assert (
+            sync_grads == False
+        ), "sync_grads argument should be false for AxoNN Strategy all_gather"
+
+        if not isinstance(data, torch.Tensor):
+            return self.all_gather_object(data, group)
+
+        # https://github.com/Lightning-AI/pytorch-lightning/blob/main/src/lightning/fabric/utilities/distributed.py#L235
+        from torch.distributed.nn.functional import all_gather
+
+        data = data.contiguous()  # https://github.com/pytorch/pytorch/issues/73515
+        gathered_data = torch.stack(all_gather(data, group=_group.WORLD))
+
+        return gathered_data
+
     @classmethod
     @override
     def register_strategies(cls, strategy_registry: _StrategyRegistry) -> None:
