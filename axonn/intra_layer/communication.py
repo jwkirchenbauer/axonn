@@ -6,9 +6,11 @@
 import torch.distributed as dist
 import torch
 import axonn.intra_layer.overlap_communication as overlap_communication
+from axonn import axonn as ax
 
 
 def _all_reduce(input_, process_group=None, overlap_comm=False):
+    ax.get_timers().start("all-reduce")
     input_ = input_.contiguous()
     if dist.get_world_size(process_group) > 1:
         handle = dist.all_reduce(
@@ -16,6 +18,7 @@ def _all_reduce(input_, process_group=None, overlap_comm=False):
         )
         if overlap_comm:
             overlap_communication.register_handle(handle)
+    ax.get_timers().stop("all-reduce")
     return input_
 
 
@@ -23,12 +26,12 @@ def _drop(input_, dim, process_group=None):
     """Divide a tensor among the tensor parallel ranks"""
     if dist.get_world_size(process_group) == 1:
         return input_
-
+    ax.get_timers().start("drop")
     total_chunks = dist.get_world_size(process_group)
     this_chunk = dist.get_rank(process_group)
     assert input_.shape[dim] % total_chunks == 0
     chunk_size = input_.shape[dim] // total_chunks
-
+    ax.get_timers().stop("drop")
     return torch.narrow(input_, dim, this_chunk * chunk_size, chunk_size)
 
 
@@ -36,7 +39,7 @@ def _gather(input_, dim, process_group=None, cache=False):
     """Gather tensors and concatenate them along a dimension"""
     if dist.get_world_size(process_group) == 1:
         return input_
-
+    ax.get_timers().start("gather")
     if input_ in overlap_communication.weights_cache:
         output, handle = overlap_communication.retrieve_all_gathered_weight(
             input_, delete=not cache
@@ -61,7 +64,7 @@ def _gather(input_, dim, process_group=None, cache=False):
 
         if cache:
             overlap_communication.weights_cache[input_] = output, None
-
+    ax.get_timers().stop("gather")
     return output
 
 
@@ -70,7 +73,7 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
 
     if dist.get_world_size(process_group) == 1:
         return input_
-
+    ax.get_timers().start("reduce-scatter")
     total_chunks = dist.get_world_size(process_group)
     assert input_.shape[dim] % total_chunks == 0
     tensor_shape = list(input_.shape)
@@ -79,6 +82,7 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
         tensor_shape, dtype=input_.dtype, device=torch.cuda.current_device()
     )
 
+    ax.get_timers().start("reduce-scatter-dist")
     if hasattr(torch.distributed, "reduce_scatter_tensor"):
         handle = torch.distributed.reduce_scatter_tensor(
             output, input_, group=process_group, async_op=overlap_comm
@@ -88,8 +92,10 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
             output, input_, group=process_group, async_op=overlap_comm
         )
 
+    ax.get_timers().stop("reduce-scatter-dist")
     if overlap_comm:
         overlap_communication.register_handle(handle)
+    ax.get_timers().stop("reduce-scatter")
     return output
 
 
