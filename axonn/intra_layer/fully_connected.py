@@ -112,7 +112,10 @@ class AsyncLinear(Function):
             weight, dim=0, process_group=depth_parallel_group, cache=cache_weights
         )
         weight = weight.reshape(local_weight_shape)
-        ctx.save_for_backward(input_, original_weight)
+        # ctx.save_for_backward(input_, original_weight)
+        # I'm dumb, but, maybe in a weight shared scenario, we need to save a unique copy of the weight?
+        ctx.save_for_backward(input_, original_weight.clone())
+
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
         ctx.shape = local_weight_shape
