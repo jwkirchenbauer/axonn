@@ -53,11 +53,14 @@ def _gather(input_, dim, process_group=None, cache=False):
         # Size and dimension.
         rank = dist.get_rank(process_group)
 
-        tensor_list = [
-            torch.empty_like(input_) for _ in range(dist.get_world_size(process_group))
-        ]
-        tensor_list[rank] = input_
-        dist.all_gather(tensor_list, input_, group=process_group)
+        # tensor_list = [
+        #     torch.empty_like(input_) for _ in range(dist.get_world_size(process_group))
+        # ]
+        # tensor_list[rank] = input_
+        # dist.all_gather(tensor_list, input_, group=process_group)
+
+        # we switch to functional version to be more compile friendly
+        tensor_list = dist.nn.functional.all_gather(input_, group=process_group)
 
         # Note: torch.cat already creates a contiguous tensor.
         output = torch.cat(tensor_list, dim=dim).contiguous()
