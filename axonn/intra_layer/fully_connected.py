@@ -316,7 +316,37 @@ class Linear(torch.nn.Module):
             if self.skip_bias_add:
                 return x, bias
             else:
-                return x + bias
+                # return x + bias
+                # I couldn't figure out why this wasnt behaving the same as torch.nn.functional.linear
+                # in an autocast context. The issue was that the bias was being added out-of-place
+                # using the normal "+" operator, equiv to torch.add(x, bias). This was causing the
+                # output to be casted to FP32.
+                # However, the regular linear layer when possible calls a fused kernel that does
+                # the addition with the matmul when possible using
+                # ...
+                # if (input_dim == 2 && bias->defined()) {
+                #     // Fused op is marginally faster.
+                #     return at::addmm(*bias, input, weight.t());
+                # }
+                # ...
+                # so we copy what we find in torch.nn.functional.linear's underlying implementation.
+                # https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/Linear.cpp
+                # for the case where fusing isn't possible.
+                # ...
+                # auto output = at::matmul(input, weight.t());
+                # if (bias->defined()) {
+                #     // for composite compliance use out-of-place version of `add`
+                #     if (isTensorSubclassLike(*bias) ||
+                #         bias->_fw_grad(/*level*/ 0).defined()) {
+                #     output = at::add(output, *bias);
+                #     } else {
+                #     output.add_(*bias);
+                #     }
+                # }
+                # return output;
+                # ...
+                x.add_(bias)
+                return x
 
     def _is_full_weight_matrix(self, weight):
         return (
